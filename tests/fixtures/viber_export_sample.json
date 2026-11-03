@@ -101,7 +101,7 @@
           "forwarded": true
         },
         {
-          "id": 113, "timestamp": 1700000720000, "authorId": 2, "outgoing": false,
+          "id": 113, "timestamp": 1700000720000, "peerId": 2,
           "kind": "call"
         },
         {
@@ -147,7 +147,7 @@
           "edited": true
         },
         {
-          "id": 204, "timestamp": 1700001125000, "authorId": 3, "outgoing": true,
+          "id": 204, "timestamp": 1700001125000, "peerId": 3,
           "kind": "call"
         },
         {
@@ -170,6 +170,12 @@
           "id": 208, "timestamp": 1700001160000, "authorId": 3, "outgoing": false,
           "kind": "text",
           "text": "second"
+        },
+        {
+          "id": 210, "timestamp": 1700001170000, "authorId": 1, "outgoing": true,
+          "kind": "text",
+          "text": "ok",
+          "replyTo": {"text": "Me too!", "messageId": 203}
         }
       ]
     },
@@ -184,6 +190,11 @@
           "kind": "post",
           "text": "Promo text",
           "reactions": {"others": {"1": 12}, "self": "👍"}
+        },
+        {
+          "id": 302, "timestamp": 1700002060000, "authorId": 2, "outgoing": false,
+          "kind": "text",
+          "text": "cross-chat quote"
         }
       ]
     }

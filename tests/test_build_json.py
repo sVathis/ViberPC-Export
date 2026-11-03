@@ -129,6 +129,10 @@ def _synthetic_db():
     # same timestamp: Viber's SortOrder decides, not the EventID
     _add(con, 208, 1160000, 20, 3, 0, 1, Body="second", so=2)
     _add(con, 209, 1160000, 20, 3, 0, 1, Body="first", so=1)
+    # a reply to the edit-history record 205 (token 9105): it must point at message 203, which is exported
+    _add(con, 210, 1170000, 20, 1, 1, 1, Body="ok", Info=_info(quote={"text": "Me too!", "token": 9105}))
+    # a quote of message 202 (token 9102) made from a different chat: no messageId is given
+    _add(con, 302, 2060000, 30, 2, 0, 1, Body="cross-chat quote", Info=_info(quote={"token": 9102}))
 
     # chat 30: a community post with a like count and our own like
     _add(con, 301, 2000000, 30, 2, 0, 15, Subject="Promo text", PGLikeCount=12, PGIsLiked=1)
@@ -204,7 +208,7 @@ def test_multiline_text_is_kept(monkeypatch):
 
 def test_call_is_kept_although_it_has_no_message_row(monkeypatch):
     call = _messages(_build(monkeypatch))[113]
-    assert call["kind"] == "call" and "text" not in call
+    assert call["kind"] == "call" and "text" not in call and call["peerId"] == 2
 
 
 def test_reply_id_resolves_through_the_event_token(monkeypatch):
@@ -235,9 +239,12 @@ def test_media_entries_reads_the_index_csv(tmp_path):
         "4,t,OUT,p,sticker,sticker,,media/stickers/00000001.png\n",
         encoding="utf-8")
     assert media_entries(str(index)) == {
-        "1": {"saved_path": "media/p/a.jpg", "status": "original"},
-        "2": {"saved_path": "media/p/thumb_b.jpg", "status": "thumbnail"},
-        "4": {"saved_path": "media/stickers/00000001.png", "status": "sticker"},
+        "1": {"saved_path": "media/p/a.jpg", "status": "original",
+              "time": "t", "direction": "IN", "kind": "image"},
+        "2": {"saved_path": "media/p/thumb_b.jpg", "status": "thumbnail",
+              "time": "t", "direction": "IN", "kind": "video"},
+        "4": {"saved_path": "media/stickers/00000001.png", "status": "sticker",
+              "time": "t", "direction": "OUT", "kind": "sticker"},
     }
     assert not media_entries(str(tmp_path / "absent.csv"))
 
@@ -262,8 +269,9 @@ def test_outgoing_call_does_not_make_a_peer_self(monkeypatch):
     msgs = _messages(doc)
     assert doc["self"]["contactIds"] == [1]
     assert {c["id"]: c["memberIds"] for c in doc["chats"]}[20] == [2, 3]
-    assert msgs[204]["outgoing"] is True               # by its Direction ...
-    assert msgs[201]["outgoing"] is False              # ... while Bob's messages stay incoming
+    assert msgs[201]["outgoing"] is False              # Bob's messages stay incoming
+    assert msgs[204]["peerId"] == 3                    # the call names Bob, but not as its author
+    assert "authorId" not in msgs[204] and "outgoing" not in msgs[204]
 
 
 def test_edit_history_record_is_dropped_and_its_message_flagged(monkeypatch):
@@ -314,9 +322,10 @@ def _write_index(tmp_path):
     (tmp_path / "media" / "photo.jpg").write_bytes(b"x")
     (tmp_path / "media_index.csv").write_text(
         "EventID,time,direction,peer,kind,status,orig_path,saved_path\n"
-        "104,t,IN,p,image,original,C:\\x\\a.jpg,media/photo.jpg\n"
-        "105,t,OUT,p,video,original,C:\\x\\b.mp4,media/gone.mp4\n"          # file no longer there
-        "99999,t,IN,p,image,original,C:\\x\\c.jpg,media/photo.jpg\n",       # event not in this database
+        "104,2023-11-14 22:16:20,IN,p,image,original,C:\\x\\a.jpg,media/photo.jpg\n"
+        "105,2023-11-14 22:17:20,OUT,p,video,original,C:\\x\\b.mp4,media/gone.mp4\n"   # file no longer there
+        "106,2023-11-14 22:18:20,IN,p,image,original,C:\\x\\d.jpg,media/photo.jpg\n"   # event 106 is a voice note
+        "99999,2023-11-14 22:16:20,IN,p,image,original,C:\\x\\c.jpg,media/photo.jpg\n",  # not in this database
         encoding="utf-8")
 
 
@@ -340,8 +349,10 @@ def test_run_links_only_media_that_belongs_here_and_exists(monkeypatch, tmp_path
     _write_index(tmp_path)
     msgs = _run(tmp_path, _file_db(tmp_path, "viber_export.db"))
     assert msgs[104]["media"]["path"] == "media/photo.jpg"
-    assert msgs[105]["media"]["status"] == "missing"
-    assert "ignored 1 entries" in capsys.readouterr().out
+    assert msgs[105]["media"]["status"] == "missing"                       # file is gone
+    assert msgs[106]["media"] == {"status": "missing", "durationMs": 14000}   # recorded as an image: mismatch
+    out = capsys.readouterr().out
+    assert "ignored 3 entries (1 for events not in this database, 1 that do not match" in out
 
 
 def test_run_does_not_use_the_default_index_for_another_database(monkeypatch, tmp_path, capsys):
@@ -377,3 +388,40 @@ def test_run_keeps_the_previous_file_when_writing_fails(monkeypatch, tmp_path):
         build_json.run(db=str(db), out=str(out))
     assert out.read_text(encoding="utf-8") == "previous export"
     assert not (tmp_path / "out.json.tmp").exists()
+
+
+def test_every_reply_id_resolves_to_an_exported_message_of_the_same_chat(monkeypatch):
+    doc = _build(monkeypatch)
+    msgs = _messages(doc)
+    for chat in doc["chats"]:
+        ids = {m["id"] for m in chat["messages"]}
+        for msg in chat["messages"]:
+            target = msg.get("replyTo", {}).get("messageId")
+            assert target is None or target in ids
+    assert msgs[210]["replyTo"]["messageId"] == 203        # quoted the dropped record 205
+    assert "replyTo" not in msgs[302]                      # quoted a message of another chat
+
+
+def test_media_entry_must_match_its_event(monkeypatch):
+    monkeypatch.setattr(config, "self_number", lambda: SELF_NUMBER)
+    model = Model(_synthetic_db())
+    row = next(dict(r) for r in model.events() if r["EventID"] == 104)    # an incoming image
+    good = {"time": "2023-11-14 22:16:20", "direction": "IN", "kind": "image"}
+    assert build_json.media_matches(good, row)
+    assert build_json.media_matches({**good, "time": "2023-11-15 03:46:20"}, row)   # +5:30, a real zone
+    assert build_json.media_matches({}, row)                                        # nothing recorded
+    assert not build_json.media_matches({**good, "time": "2023-11-14 22:16:21"}, row)
+    assert not build_json.media_matches({**good, "time": "garbage"}, row)
+    assert not build_json.media_matches({**good, "direction": "OUT"}, row)
+    assert not build_json.media_matches({**good, "kind": "video"}, row)
+
+
+def test_media_path_must_be_relative_and_stay_inside_the_export(tmp_path):
+    base = tmp_path / "export"
+    (base / "media").mkdir(parents=True)
+    (base / "media" / "a.jpg").write_bytes(b"x")
+    (tmp_path / "outside.jpg").write_bytes(b"x")
+    assert build_json.safe_media_file("media/a.jpg", str(base))
+    for bad in ("../outside.jpg", "media/../../outside.jpg", "/etc/hostname", "C:/x/a.jpg",
+                "media\\a.jpg", "media/missing.jpg", ""):
+        assert not build_json.safe_media_file(bad, str(base)), bad

@@ -19,10 +19,11 @@ from .model import Model, require_db
 
 
 def media_entries(path=None):
-    """EventID (str) -> {"saved_path", "status"} for every row of
-    export/media_index.csv that has a copied file (saved_path is relative to
-    export/, forward slashes). status is the CSV status: original | thumbnail |
-    sticker."""
+    """EventID (str) -> {"saved_path", "status", "time", "direction", "kind"} for
+    every row of export/media_index.csv that has a copied file (saved_path is
+    relative to export/, forward slashes). status is the CSV status: original |
+    thumbnail | sticker; time / direction / kind are what the index recorded
+    about the event, so a reader can check the entry still fits it."""
     path = path or os.path.join(config.EXPORT_DIR, "media_index.csv")
     index = {}
     if not os.path.exists(path):
@@ -31,7 +32,10 @@ def media_entries(path=None):
         for row in csv.DictReader(f):
             if row.get("saved_path"):
                 index[row["EventID"]] = {"saved_path": row["saved_path"],
-                                         "status": row.get("status") or ""}
+                                         "status": row.get("status") or "",
+                                         "time": row.get("time") or "",
+                                         "direction": row.get("direction") or "",
+                                         "kind": row.get("kind") or ""}
     return index
 
 

@@ -130,8 +130,9 @@ is what the tests compare against.
     "messages": [{                             // chronological
       "id": 101,                               // Events.EventID
       "timestamp": 1700000000000,              // Events.TimeStamp, epoch ms, as stored
-      "authorId": 2,                           // Events.ContactID
-      "outgoing": false,
+      "authorId": 2,                           // Events.ContactID (not on calls)
+      "outgoing": false,                       // (not on calls)
+      "peerId": 2,                             // calls only: the other party
       "kind": "text|image|video|voice|file|sticker|link|reaction|post|system|call|location|contact",
       "text": "…", "caption": "…",             // text keeps its newlines
       "link":   { "url": "…", "title": "…" },
@@ -148,18 +149,24 @@ is what the tests compare against.
 Rules a reader can rely on:
 
 - Absent optional fields are **omitted** (never empty strings, never `null`). `edited` and
-  `forwarded` are only present when `true`; `outgoing` is always present.
+  `forwarded` are only present when `true`. Every message has `authorId` and `outgoing`
+  except calls (see below).
 - `media.path` is the `saved_path` of `media_index.csv`: relative to `export/`, forward
   slashes. A file that was not copied (or `media` was not run) has `"status": "missing"`
   and **no** `path`; a received item only available as a thumbnail has `"status": "thumbnail"`.
   `media.name` is the original file name (voice notes have none). No absolute Windows
   path ever appears in the file.
-- `replyTo.messageId` is the `id` of the quoted message when it is in the export (Viber's
-  quote token equals the quoted event's `Events.Token`); otherwise only `text` is given.
+- `replyTo.messageId` is the `id` of the quoted message when that message is in the same
+  chat of the export (Viber's quote token equals the quoted event's `Events.Token`); a
+  quote of a dropped edit-history record points at the edited message. Otherwise only
+  `text` is given, so every `messageId` resolves to a message in the same `messages` list.
 - `reactions.others` maps Viber's reaction ids (`1` 👍, `2` ❤️, `3` 😂, `4` 😮, `5` 😢,
   `6` 😡, `7` 👎) to counts; a community "like count" is reported as reaction `1`.
-- `call` entries (Events with no message row) currently carry **only** `kind: "call"`:
-  the export has no call duration, direction or video flag, so `call` is not written yet.
+- `call` entries (Events with no message row) carry `kind: "call"` and `peerId` (the
+  `ContactID` of the other party) but **no `authorId` and no `outgoing`**: the export
+  records no reliable direction for calls (all of them have `Direction` 0), so who started
+  a call is unknown. There is no call duration or video flag either, so the `call` object
+  is not written yet.
 - `location.lat` / `lon` are degrees (Viber stores them ×1e7); the address, when known,
   is in `text`. They are omitted when Viber stored no coordinates.
 - `self.contactIds` lists every contact id that is you: the configured account, plus the
@@ -177,9 +184,11 @@ Rules a reader can rely on:
   bubbles: `replyTo.messageId` is the message that was reacted to, so a viewer should fold
   them into that message instead of showing them.
 - Media: `media_index.csv` is linked only for the default `--db` (override with
-  `--media-index FILE`), and only entries whose event is in that database and whose copied
-  file still exists; the rest read as `"status": "missing"`. The file is written atomically
-  (an interrupted run never replaces a good export).
+  `--media-index FILE`). An entry is used only if its event is in that database, its
+  recorded direction, kind and time agree with the event (event ids repeat between
+  databases), and its `saved_path` is a relative path inside the export folder that exists
+  as a file. Anything else is ignored with a warning and reads as `"status": "missing"`.
+  The file is written atomically (an interrupted run never replaces a good export).
 - Older databases that lack optional columns (`PGType`, `SortOrder`, `Token`,
   `ClientFlag`, …) still export: the missing values just read as absent.
 

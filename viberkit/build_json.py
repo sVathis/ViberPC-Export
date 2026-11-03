@@ -12,6 +12,7 @@ path. Nothing here ever writes an absolute (Windows) path.
 """
 import json
 import os
+import re
 from datetime import datetime, timezone
 
 from . import config
@@ -79,7 +80,7 @@ def _raw(row, stripped):
     return stripped
 
 
-def _message(row, token_ids, selfids, media, edited_ids):
+def _message(row, refs, selfids, media, edited_ids):
     """One message dict from a joined Events(+Messages) row."""
     desc = enrich.describe(row) if row["Type"] is not None else enrich.describe_event(row)
     kind = desc["kind"]
@@ -87,13 +88,15 @@ def _message(row, token_ids, selfids, media, edited_ids):
     entry = media.get(event_id)
     info = enrich.parse_info(row.get("Info"))
 
-    msg = {
-        "id": row["EventID"],
-        "timestamp": row["ts"],
-        "authorId": row["cid"],
-        "outgoing": row["dir"] == 1 or row["cid"] in selfids,
-        "kind": kind,
-    }
+    msg = {"id": row["EventID"], "timestamp": row["ts"], "kind": kind}
+    if kind == "call":
+        # The export has no reliable direction for a call (every one has Direction 0),
+        # so who started it is unknown: only the other party is named.
+        if row["cid"]:
+            msg["peerId"] = row["cid"]
+    else:
+        msg["authorId"] = row["cid"]
+        msg["outgoing"] = row["dir"] == 1 or row["cid"] in selfids
 
     text = ""
     if kind == "text":
@@ -152,9 +155,9 @@ def _message(row, token_ids, selfids, media, edited_ids):
     reply = {}
     if ctx["reply_to"]:
         reply["text"] = ctx["reply_to"]
-    quoted = token_ids.get(ctx["reply_token"]) if ctx["reply_token"] else None
-    if quoted is not None:
-        reply["messageId"] = quoted
+    ref = refs.get(ctx["reply_token"]) if ctx["reply_token"] else None
+    if ref is not None and ref[1] == row["chat"]:       # an exported message of the same chat
+        reply["messageId"] = ref[0]
     if reply:
         msg["replyTo"] = reply
     if ctx["edited"] or row["EventID"] in edited_ids:
@@ -178,25 +181,41 @@ def _message(row, token_ids, selfids, media, edited_ids):
 
 
 def _conversation_rows(rows, token_ids):
-    """Drop what is not a chat message; return (rows, ids of edited messages).
+    """Drop what is not a chat message; return (rows, edited ids, redirect).
 
     Left out: events without a message row that are not calls, and technical
     edit-history records (Messages.ClientFlag bit 256) whose edited message is
     another row in the export - that message stays, flagged as edited. A
-    history record that is the only row for its message is kept.
+    history record that is the only row for its message is kept. redirect maps
+    each dropped record's EventID to the message it was about.
     """
     history = {r["EventID"]: enrich.edit_history_token(r) for r in rows}
     history = {eid: tok for eid, tok in history.items() if tok}
-    superseded, edited = set(), set()
+    redirect, edited = {}, set()
     for eid, tok in history.items():
         target = token_ids.get(tok)
         if target is not None and target != eid and target not in history:
-            superseded.add(eid)
+            redirect[eid] = target
             edited.add(target)
     kept = [r for r in rows
-            if r["EventID"] not in superseded
+            if r["EventID"] not in redirect
             and (r["Type"] is not None or r["etype"] in CALL_EVENT_TYPES)]
-    return kept, edited
+    return kept, edited, redirect
+
+
+def _references(rows, token_ids, redirect):
+    """Info token -> (EventID, ChatID) of an exported message.
+
+    A token of a dropped edit-history record resolves to the message it was
+    about; a token of anything that is not exported resolves to nothing.
+    """
+    chat_of = {r["EventID"]: r["chat"] for r in rows}
+    refs = {}
+    for token, eid in token_ids.items():
+        eid = redirect.get(eid, eid)
+        if eid in chat_of:
+            refs[token] = (eid, chat_of[eid])
+    return refs
 
 
 def build(model, media=None, exported_at=None):
@@ -214,7 +233,8 @@ def build(model, media=None, exported_at=None):
     for r in rows:
         if r["token"]:
             token_ids.setdefault(r["token"], r["EventID"])
-    rows, edited_ids = _conversation_rows(rows, token_ids)
+    rows, edited_ids, redirect = _conversation_rows(rows, token_ids)
+    refs = _references(rows, token_ids, redirect)
 
     # Self = the configured account, plus whoever authored an outgoing
     # *message* (so it still works when the account number could not be
@@ -241,7 +261,7 @@ def build(model, media=None, exported_at=None):
             "title": _chat_title(model, chat, kind, others),
             "type": kind,
             "memberIds": others,
-            "messages": [_message(r, token_ids, selfids, media, edited_ids) for r in chat_rows],
+            "messages": [_message(r, refs, selfids, media, edited_ids) for r in chat_rows],
         })
 
     self_info = {"contactIds": sorted(selfids)}
@@ -261,23 +281,67 @@ def build(model, media=None, exported_at=None):
     }
 
 
-def usable_media(model, media, base_dir):
-    """Keep only media-index rows that belong to this database and exist on disk.
+def safe_media_file(rel, base_dir):
+    """True for an existing file given as a relative, forward-slash path that
+    stays inside base_dir (no drive letter, no backslashes, no `..` escape)."""
+    if not rel or "\\" in rel or rel.startswith("/") or re.match(r"^[A-Za-z]:", rel):
+        return False
+    root = os.path.realpath(base_dir)
+    full = os.path.realpath(os.path.join(root, rel))
+    return full.startswith(root + os.sep) and os.path.isfile(full)
 
-    Returns (media, unknown, missing): the kept entries, and how many were
-    dropped because their EventID is not in the database (an index from another
-    export) or because the copied file is gone from base_dir.
+
+def media_matches(entry, row):
+    """Does an index entry's recorded metadata agree with the event it names?
+
+    EventIDs repeat between different databases, so an index from another export
+    could otherwise attach its files to unrelated messages. Checks direction,
+    kind and timestamp; whatever the entry does not record is not checked. The
+    index time is the local time of the machine that ran `media`, so any whole
+    quarter-hour offset from UTC is accepted.
     """
-    known = {str(r[0]) for r in model.con.execute("SELECT EventID FROM Events")}
-    kept, unknown, missing = {}, 0, 0
+    direction = entry.get("direction")
+    if direction and direction != ("OUT" if row["dir"] == 1 else "IN"):
+        return False
+    kind = entry.get("kind")
+    if kind and kind != enrich.describe(row)["kind"]:
+        return False
+    stamp = entry.get("time")
+    if stamp:
+        try:
+            written = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
+            utc = datetime.fromtimestamp(row["ts"] // 1000, timezone.utc).replace(tzinfo=None)
+        except (ValueError, TypeError, OverflowError, OSError):
+            return False
+        offset = (written - utc).total_seconds()
+        if offset % 900 or abs(offset) > 14 * 3600:
+            return False
+    return True
+
+
+def usable_media(model, media, base_dir):
+    """Keep only media-index entries that belong to this database's events.
+
+    Returns (kept, dropped); dropped counts the ignored entries by reason:
+    unknown (EventID not in this database), mismatch (metadata disagrees with
+    the event) and unusable (file gone from base_dir, or an unsafe path).
+    """
+    rows = {}
+    for r in model.events():
+        if str(r["EventID"]) in media:
+            rows[str(r["EventID"])] = dict(r)
+    kept, dropped = {}, {"unknown": 0, "mismatch": 0, "unusable": 0}
     for eid, entry in media.items():
-        if eid not in known:
-            unknown += 1
-        elif not os.path.isfile(os.path.join(base_dir, entry["saved_path"])):
-            missing += 1
+        row = rows.get(eid)
+        if row is None:
+            dropped["unknown"] += 1
+        elif not media_matches(entry, row):
+            dropped["mismatch"] += 1
+        elif not safe_media_file(entry["saved_path"], base_dir):
+            dropped["unusable"] += 1
         else:
             kept[eid] = entry
-    return kept, unknown, missing
+    return kept, dropped
 
 
 def run(db=None, out=None, media_index=None):
@@ -293,10 +357,13 @@ def run(db=None, out=None, media_index=None):
     model = Model(db)
     try:
         media = media_entries(index_path) if index_path else {}
-        media, unknown, missing = usable_media(model, media, os.path.dirname(os.path.abspath(index_path or out)))
-        if unknown or missing:
-            print(f"[!] media index: ignored {unknown} entries for events not in this database "
-                  f"and {missing} whose file is gone - re-run `media` if that is unexpected")
+        media, dropped = usable_media(model, media, os.path.dirname(os.path.abspath(index_path or out)))
+        if any(dropped.values()):
+            print(f"[!] media index: ignored {sum(dropped.values())} entries "
+                  f"({dropped['unknown']} for events not in this database, "
+                  f"{dropped['mismatch']} that do not match their event, "
+                  f"{dropped['unusable']} with a missing file or unsafe path) "
+                  "- re-run `media` if that is unexpected")
         doc = build(model, media)
     finally:
         model.close()
