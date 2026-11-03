@@ -122,7 +122,9 @@ def describe(row):
 
     if payload or mtype in MEDIA_KIND:
         kind = MEDIA_KIND.get(mtype, "file")
-        if kind == "file" and is_voice(payload):
+        # A voice note that was never downloaded has no path to recognise it by,
+        # but still carries Info.audio_ptt.
+        if kind == "file" and (is_voice(payload) or isinstance(info.get("audio_ptt"), dict)):
             kind = "voice"
         dur = _fmt_duration(row.get("Duration"))
         if kind == "voice":

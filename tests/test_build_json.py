@@ -111,6 +111,7 @@ def _synthetic_db():
          Info=_info(**{"1on1reactions": {"reaction": 2, "reaction_v1": 2}, "quote": {"token": 9004}}))
     _add(con, 115, 840000, 10, 2, 0, 72)
     _add(con, 116, 900000, 10, 2, 0, None, etype=2)                   # an unmatched event that is no call
+    _add(con, 117, 960000, 10, 2, 0, 11, Info=_info(audio_ptt={"duration": 9000}))   # voice, never downloaded
 
     # chat 20: a group (self is also listed as a member); one reply to a token that is not in the export
     _add(con, 201, 1000000, 20, 3, 0, 1, Body="Who is in?")

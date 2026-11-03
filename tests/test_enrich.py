@@ -205,3 +205,8 @@ def test_edit_history_token_needs_the_flag_and_a_token():
     assert enrich.edit_history_token(_row(ClientFlag=256, Info='{"edit":{"editedWithToken":5}}')) is None
     assert enrich.edit_history_token(_row(ClientFlag=256, Info="{}")) is None
     assert enrich.edit_history_token(_row(Info=info)) is None                       # no ClientFlag column
+
+
+def test_voice_note_that_was_never_downloaded_is_still_voice():
+    d = enrich.describe(_row(Type=11, PayloadPath="", Info='{"audio_ptt":{"duration":9000}}'))
+    assert d["kind"] == "voice" and d["text"] == "[Voice message] (missing on disk)"

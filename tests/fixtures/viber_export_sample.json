@@ -114,6 +114,11 @@
           "id": 115, "timestamp": 1700000840000, "authorId": 2, "outgoing": false,
           "kind": "system",
           "text": "[system message]"
+        },
+        {
+          "id": 117, "timestamp": 1700000960000, "authorId": 2, "outgoing": false,
+          "kind": "voice",
+          "media": {"status": "missing", "durationMs": 9000}
         }
       ]
     },
