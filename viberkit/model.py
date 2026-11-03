@@ -35,14 +35,17 @@ class Model:
     """Contact/chat resolution over one export database."""
 
     def __init__(self, db):
-        self.con = sqlite3.connect(db)
+        # `db` is a path, or an already-open connection (used by the tests).
+        self.con = db if isinstance(db, sqlite3.Connection) else sqlite3.connect(db)
         self.con.row_factory = sqlite3.Row
         cur = self.con.cursor()
         self.contacts, self.chatinfo, self.chatrel = {}, {}, {}
+        self.chattype = {}
         for r in cur.execute("SELECT ContactID,Name,Number,ClientName FROM Contact"):
             self.contacts[r["ContactID"]] = (r["Name"], r["Number"], r["ClientName"])
-        for r in cur.execute("SELECT ChatID,Name FROM ChatInfo"):
+        for r in cur.execute("SELECT ChatID,Name,PGType FROM ChatInfo"):
             self.chatinfo[r["ChatID"]] = r["Name"]
+            self.chattype[r["ChatID"]] = r["PGType"]
         for r in cur.execute("SELECT ChatID,ContactID FROM ChatRelation"):
             self.chatrel.setdefault(r["ChatID"], []).append(r["ContactID"])
         self_num = config.self_number()
@@ -88,13 +91,19 @@ class Model:
             peer = self.clabel(non_self[0]) if non_self else None
         return False, (peer or chatname or f"ChatID={chat}")
 
-    def events(self):
-        """Yield joined Events + Messages rows in chronological order."""
-        cols = ",".join(f"m.{c} {c}" for c in MESSAGE_COLS)
+    def events(self, include_empty=False):
+        """Yield joined Events + Messages rows in chronological order.
+
+        With include_empty=True, Events that have no Messages row (calls, ...)
+        are kept too (their message columns are NULL).
+        """
+        cols = ",".join(f"m.{c} {c}" for c in MESSAGE_COLS if c != "EventID")
+        join = "LEFT JOIN" if include_empty else "JOIN"
         q = (f"SELECT e.TimeStamp ts, e.Direction dir, e.ChatID chat, "
-             f"e.ContactID cid, {cols} "
-             "FROM Events e JOIN Messages m ON m.EventID=e.EventID "
-             "ORDER BY e.TimeStamp")
+             f"e.ContactID cid, e.EventID EventID, e.Type etype, e.Token token, "
+             f"e.ContactLatitude lat, e.ContactLongitude lon, {cols} "
+             f"FROM Events e {join} Messages m ON m.EventID=e.EventID "
+             "ORDER BY e.TimeStamp, e.EventID")
         return self.con.execute(q)
 
     def close(self):

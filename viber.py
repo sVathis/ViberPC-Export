@@ -6,9 +6,10 @@ Methods (from recommended to auxiliary):
   export   Export the decrypted tables from the LIVE Viber connection to a clean file.  [RECOMMENDED]
            No key needed; uses Viber's already-unlocked engine. Viber must be running.
   media    Copy the images/videos/files/stickers referenced by the export into export/media/.
+  json     Build export/viber_export.json: structured chats/messages with ids, for a viewer.
   log      Build a readable chronological log from the export (text, media, stickers, likes).
   html     Build a browsable HTML view of the chats (with embedded images).
-  all      = export + media + log + html
+  all      = export + media + json + log + html
 
   carve    Fallback: carve messages out of Viber's RAM without the key (partial names).
   hookkey  Capture the SQLCipher key/salt that Viber sets (for the offline 'open').
@@ -38,6 +39,11 @@ def cmd_media(a):
     export_media.run(db=a.db, include_thumbs=not a.no_thumbs)
 
 
+def cmd_json(a):
+    from viberkit import build_json
+    build_json.run(db=a.db, out=a.out)
+
+
 def cmd_log(a):
     from viberkit import build_log
     build_log.run(db=a.db)
@@ -49,9 +55,10 @@ def cmd_html(a):
 
 
 def cmd_all(a):
-    from viberkit import frida_export, export_media, build_log, build_html
+    from viberkit import frida_export, export_media, build_json, build_log, build_html
     if frida_export.run(timeout=a.timeout):
         export_media.run()
+        build_json.run()
         build_log.run()
         build_html.run()
 
@@ -113,6 +120,11 @@ def main():
     s.add_argument("--no-thumbs", action="store_true", help="skip thumbnails when the original is missing")
     s.set_defaults(func=cmd_media)
 
+    s = sub.add_parser("json", help="build export/viber_export.json (structured, for a viewer)")
+    s.add_argument("--db", default=None, help="path to a clean .db (default export/viber_export.db)")
+    s.add_argument("--out", default=None, help="output file (default export/viber_export.json)")
+    s.set_defaults(func=cmd_json)
+
     s = sub.add_parser("log", help="build the log from the export")
     s.add_argument("--db", default=None, help="path to a clean .db (default export/viber_export.db)")
     s.set_defaults(func=cmd_log)
@@ -121,7 +133,7 @@ def main():
     s.add_argument("--db", default=None, help="path to a clean .db (default export/viber_export.db)")
     s.set_defaults(func=cmd_html)
 
-    s = sub.add_parser("all", help="export + media + log + html")
+    s = sub.add_parser("all", help="export + media + json + log + html")
     s.add_argument("--timeout", type=int, default=90)
     s.set_defaults(func=cmd_all)
 

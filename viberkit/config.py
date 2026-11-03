@@ -86,3 +86,7 @@ def plain_db_path():
 
 def log_path():
     return _ex("viber_messages.txt")
+
+
+def json_path():
+    return _ex("viber_export.json")

@@ -127,3 +127,71 @@ def test_context_none():
 def test_clean_strips_bidi_controls():
     assert clean(chr(0x2068) + "Ilija" + chr(0x2069)) == "Ilija"   # FSI ... PDI
     assert clean("plain") == "plain"
+
+
+def test_location_message():
+    info = '{"locationInfo":{"address":"1 Example Street"}}'
+    row = _row(Type=5, Info=info, lat=407128000, lon=-740060000)
+    d = enrich.describe(row)
+    assert d["kind"] == "location" and d["text"] == "[Location] 1 Example Street"
+    assert enrich.location(row) == {"lat": 40.7128, "lon": -74.006, "address": "1 Example Street"}
+
+
+def test_location_without_coordinates_keeps_only_the_address():
+    row = _row(Type=5, Info='{"locationInfo":{"address":"Somewhere"}}', lat=0, lon=0)
+    assert enrich.location(row) == {"address": "Somewhere"}
+
+
+def test_location_rejects_out_of_range_coordinates():
+    assert enrich.location(_row(Type=5, lat=2000000000, lon=0)) == {}
+
+
+def test_location_is_none_for_other_messages():
+    assert enrich.location(_row(Type=1, Body="hi")) is None
+
+
+def test_contact_card():
+    info = '{"Name":"Dan Example","PhoneNumber":"","ViberNumber":"+10000000005"}'
+    row = _row(Type=10, Info=info)
+    assert enrich.contact_card(row) == {"name": "Dan Example", "number": "+10000000005"}
+    d = enrich.describe(row)
+    assert d["kind"] == "contact" and "Dan Example" in d["text"]
+
+
+def test_contact_card_is_none_for_other_messages():
+    assert enrich.contact_card(_row(Type=1)) is None
+
+
+def test_forwarded():
+    assert enrich.forwarded(_row(Info='{"generalFwdInfo":{"num_forwards":1}}')) is True
+    assert enrich.forwarded(_row(Info="{}")) is False
+
+
+def test_media_duration_ms_from_column_then_voice_info():
+    assert enrich.media_duration_ms(_row(Type=3, Duration=22431)) == 22431
+    assert enrich.media_duration_ms(_row(Type=11, Duration=0, Info='{"audio_ptt":{"duration":14000}}')) == 14000
+    assert enrich.media_duration_ms(_row(Type=2)) is None
+
+
+def test_file_name_prefers_file_info_and_handles_windows_paths():
+    assert enrich.file_name(_row(PayloadPath="C:\\Users\\x\\Viber\\clip.mp4")) == "clip.mp4"
+    assert enrich.file_name(_row(PayloadPath="C:\\x\\h4sh.bin", Info='{"fileInfo":{"FileName":"Report.pdf"}}')) \
+        == "Report.pdf"
+    assert enrich.file_name(_row()) == ""
+
+
+def test_describe_event_call_and_unknown():
+    assert enrich.describe_event({"etype": 1})["kind"] == "call"
+    assert enrich.describe_event({"etype": 9})["kind"] == "system"
+
+
+def test_context_reply_token():
+    ctx = enrich.context(_row(Info='{"quote":{"text":"x","token":9001,"messageID":5}}'))
+    assert ctx["reply_token"] == 9001
+    assert enrich.context(_row(Info='{"quote":{"text":"x","token":0}}'))["reply_token"] is None
+    assert enrich.context(_row(Info="{}"))["reply_token"] is None
+
+
+def test_reactions_self_like_from_pg_is_liked():
+    _, detail = enrich.reactions(_row(PGIsLiked=1, PGLikeCount=2))
+    assert detail["self_like"] == "\U0001F44D" and detail["self"] == "" and detail["like_count"] == 2

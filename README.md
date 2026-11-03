@@ -78,10 +78,11 @@ The readable log is then built from that clean file.
 ## 🚀 Usage
 
 ```bash
-python viber.py all            # RECOMMENDED: export + media + log + html
+python viber.py all            # RECOMMENDED: export + media + json + log + html
 # or step by step:
 python viber.py export
 python viber.py media
+python viber.py json
 python viber.py log
 python viber.py html
 ```
@@ -95,6 +96,7 @@ Output:
 - `export/media_index.csv` — which message each media file belongs to
 - `export/viber_messages.txt` — a readable chronological log (text, images, videos, files, stickers, links, replies, reactions, edits)
 - `export/viber_log.jsonl` — the same log as structured JSON, one event per line (ideal for feeding to an AI)
+- `export/viber_export.json` — structured chats with ids, timestamps and media paths, for viewers (see [the format](#-viber_exportjson-structured-export-for-viewers))
 - `export/viber_chats.html` — a browsable chat view with embedded images (open it in a browser)
 
 > [!NOTE]
@@ -105,15 +107,74 @@ Output:
 If `export` says there was no activity, **open a chat in Viber** while the script is
 waiting (this triggers a read from the DB) and run it again.
 
+## 🧾 `viber_export.json` (structured export for viewers)
+
+`python viber.py json` writes `export/viber_export.json`: the chats exactly as Viber
+stores them, with ids, so another program (for example a browser chat viewer) can rebuild
+the conversations without parsing the human-readable log. Unlike `viber_log.jsonl` it
+groups messages by **chat id** (not by a display label), keeps multi-line text as it is,
+and keeps stable ids and epoch timestamps. Run `media` first so media files get a `path`.
+The format is **version 1**; a small synthetic example is checked in as
+[`tests/fixtures/viber_export_sample.json`](tests/fixtures/viber_export_sample.json) and
+is what the tests compare against.
+
+```jsonc
+{ "format": "viberpc-export", "version": 1, "exportedAt": "2025-01-01T00:00:00Z",   // UTC
+  "self": { "contactIds": [1], "name": "…", "number": "…" },
+  "contacts": { "<ContactID>": { "name": "…", "number": "…" } },   // only contacts used below
+  "chats": [{
+    "id": 10,                                  // Events.ChatID
+    "title": "…",                              // group/community: ChatInfo.Name; direct: the other member
+    "type": "direct | group | community",      // community = ChatInfo.PGType not 255 (channels too)
+    "memberIds": [2],                          // ContactIDs of the other participants (not self)
+    "messages": [{                             // chronological
+      "id": 101,                               // Events.EventID
+      "timestamp": 1700000000000,              // Events.TimeStamp, epoch ms, as stored
+      "authorId": 2,                           // Events.ContactID
+      "outgoing": false,
+      "kind": "text|image|video|voice|file|sticker|link|reaction|post|system|call|location|contact",
+      "text": "…", "caption": "…",             // text keeps its newlines
+      "link":   { "url": "…", "title": "…" },
+      "media":  { "path": "media/…", "status": "original|thumbnail|missing", "name": "…", "durationMs": 0 },
+      "sticker": { "id": 40103, "path": "media/stickers/00040103.png" },
+      "replyTo": { "text": "…", "messageId": 101 },
+      "edited": true, "forwarded": true,
+      "reactions": { "others": { "<reactionId>": 2 }, "self": "…" },
+      "call":     { "durationMs": 0, "video": false, "missed": false },
+      "location": { "lat": 40.7128, "lon": -74.006 },
+      "contact":  { "name": "…", "number": "…" } }] }] }
+```
+
+Rules a reader can rely on:
+
+- Absent optional fields are **omitted** (never empty strings, never `null`). `edited` and
+  `forwarded` are only present when `true`; `outgoing` is always present.
+- `media.path` is the `saved_path` of `media_index.csv`: relative to `export/`, forward
+  slashes. A file that was not copied (or `media` was not run) has `"status": "missing"`
+  and **no** `path`; a received item only available as a thumbnail has `"status": "thumbnail"`.
+  `media.name` is the original file name (voice notes have none). No absolute Windows
+  path ever appears in the file.
+- `replyTo.messageId` is the `id` of the quoted message when it is in the export (Viber's
+  quote token equals the quoted event's `Events.Token`); otherwise only `text` is given.
+- `reactions.others` maps Viber's reaction ids (`1` 👍, `2` ❤️, `3` 😂, `4` 😮, `5` 😢,
+  `6` 😡, `7` 👎) to counts; a community "like count" is reported as reaction `1`.
+- `call` entries (Events with no message row) currently carry **only** `kind: "call"`:
+  the export has no call duration, direction or video flag, so `call` is not written yet.
+- `location.lat` / `lon` are degrees (Viber stores them ×1e7); the address, when known,
+  is in `text`. They are omitted when Viber stored no coordinates.
+- `self.contactIds` lists every contact id that is you (the configured account, plus the
+  author of any outgoing message); use it, not `outgoing`, to tell your own contact entry.
+
 ## 🧰 All methods
 
 | Command | What it does | Needs Viber? | Needs the key? |
 |---|---|:---:|:---:|
 | `export` | export from the live connection **(recommended)** | ✅ | ❌ |
 | `media` | copy images/videos/files/stickers into `export/media/` | ❌ | ❌ |
+| `json` | structured `viber_export.json` (chats, ids, calls, locations) for viewers | ❌ | ❌ |
 | `log` | full log (text, media, stickers, replies, reactions) + JSONL | ❌ | ❌ |
 | `html` | browsable HTML chat view with embedded images | ❌ | ❌ |
-| `all` | `export` + `media` + `log` + `html` | ✅ | ❌ |
+| `all` | `export` + `media` + `json` + `log` + `html` | ✅ | ❌ |
 | `carve` | pull messages from RAM (partial names) | ✅ | ❌ |
 | `hookkey` | capture the SQLCipher key/salt | ✅ | — |
 | `open` | offline SQLCipher open of a copy | ❌ | ✅ |
@@ -153,12 +214,13 @@ viberkit/           # per-method logic
   stickers.py         resolve sticker ids to cached PNGs
   export_media.py     copy media into export/media/
   build_log.py        full log (.txt + .jsonl) from the export
+  build_json.py       structured viber_export.json (chats, ids, media paths)
   build_html.py       browsable HTML chat view
   frida_carve.py      carving from RAM
   frida_hookkey.py    key capture
   sqlcipher_open.py   offline opening
   frida_schema.py     schema from memory
-tests/              # pytest unit tests for the enrichment logic
+tests/              # pytest: enrichment logic + the JSON export (synthetic data only)
 export/             # your data (gitignored, empty in the repo)
 attic/              # research notes + a probe tool (reference)
 .env / .env.example # secrets (ignored) / template
