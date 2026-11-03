@@ -46,7 +46,7 @@ def _info(**kw):
     return json.dumps(kw)
 
 
-def _add(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+def _add(  # pylint: disable=too-many-arguments
         con, eid, offset_ms, chat, cid, direction, mtype, *, etype=0, lat=0, lon=0, **cols):
     """Insert an Events row (its Token is 8900 + eid) and, unless mtype is None, its Messages row."""
     con.execute("INSERT INTO Events VALUES (?,?,?,?,?,?,?,?,?)",
@@ -215,7 +215,7 @@ def test_media_entries_reads_the_index_csv(tmp_path):
         "2": {"saved_path": "media/p/thumb_b.jpg", "status": "thumbnail"},
         "4": {"saved_path": "media/stickers/00000001.png", "status": "sticker"},
     }
-    assert media_entries(str(tmp_path / "absent.csv")) == {}
+    assert not media_entries(str(tmp_path / "absent.csv"))
 
 
 def test_run_writes_the_json_file(monkeypatch, tmp_path):
