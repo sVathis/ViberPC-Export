@@ -155,9 +155,9 @@ def _message(row, refs, selfids, media, edited_ids):
     reply = {}
     if ctx["reply_to"]:
         reply["text"] = ctx["reply_to"]
-    ref = refs.get(ctx["reply_token"]) if ctx["reply_token"] else None
-    if ref is not None and ref[1] == row["chat"]:       # an exported message of the same chat
-        reply["messageId"] = ref[0]
+    target_id, target_chat = refs.get(ctx["reply_token"], (None, None))
+    if target_id is not None and target_chat == row["chat"]:    # an exported message of the same chat
+        reply["messageId"] = target_id
     if reply:
         msg["replyTo"] = reply
     if ctx["edited"] or row["EventID"] in edited_ids:
