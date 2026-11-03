@@ -112,6 +112,10 @@ def _synthetic_db():
     _add(con, 115, 840000, 10, 2, 0, 72)
     _add(con, 116, 900000, 10, 2, 0, None, etype=2)                   # an unmatched event that is no call
     _add(con, 117, 960000, 10, 2, 0, 11, Info=_info(audio_ptt={"duration": 9000}))   # voice, never downloaded
+    # a reaction taken back (reaction 0) to message 101, and an old-style record naming nothing
+    _add(con, 118, 1020000, 10, 1, 1, 0, etype=3, Body="6253459179658317583",
+         Info=_info(**{"1on1reactions": {"reaction": 0, "reaction_v1": 0}, "quote": {"token": 9001}}))
+    _add(con, 119, 1080000, 10, 2, 0, 0, etype=3, Body="6253455409851423095")
 
     # chat 20: a group (self is also listed as a member); one reply to a token that is not in the export
     _add(con, 201, 1000000, 20, 3, 0, 1, Body="Who is in?")
@@ -288,9 +292,16 @@ def test_unmatched_event_that_is_not_a_call_is_left_out(monkeypatch):
     assert 116 not in _messages(_build(monkeypatch))
 
 
-def test_reaction_record_points_at_its_target(monkeypatch):
-    msg = _messages(_build(monkeypatch))[114]
-    assert msg["kind"] == "reaction" and msg["replyTo"] == {"messageId": 104}
+def test_reaction_records_are_not_messages(monkeypatch):
+    doc = _build(monkeypatch)
+    msgs = _messages(doc)
+    assert not {114, 118, 119} & set(msgs)
+    assert "reaction" not in {m["kind"] for m in msgs.values()}
+    events = {e["id"]: e for c in doc["chats"] for e in c["reactionEvents"]}
+    assert events[114] == {"id": 114, "timestamp": 1700000780000, "authorId": 2, "outgoing": False,
+                           "targetId": 104, "reaction": "2"}
+    assert events[118]["removed"] is True and events[118]["targetId"] == 101
+    assert "targetId" not in events[119] and "reaction" not in events[119] and "removed" not in events[119]
 
 
 def test_same_timestamp_follows_sort_order(monkeypatch):

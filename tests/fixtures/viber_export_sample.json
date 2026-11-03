@@ -105,12 +105,6 @@
           "kind": "call"
         },
         {
-          "id": 114, "timestamp": 1700000780000, "authorId": 2, "outgoing": false,
-          "kind": "reaction",
-          "text": "[reacted ❤️]",
-          "replyTo": {"messageId": 104}
-        },
-        {
           "id": 115, "timestamp": 1700000840000, "authorId": 2, "outgoing": false,
           "kind": "system",
           "text": "[system message]"
@@ -119,6 +113,19 @@
           "id": 117, "timestamp": 1700000960000, "authorId": 2, "outgoing": false,
           "kind": "voice",
           "media": {"status": "missing", "durationMs": 9000}
+        }
+      ],
+      "reactionEvents": [
+        {
+          "id": 114, "timestamp": 1700000780000, "authorId": 2, "outgoing": false,
+          "targetId": 104, "reaction": "2"
+        },
+        {
+          "id": 118, "timestamp": 1700001020000, "authorId": 1, "outgoing": true,
+          "targetId": 101, "removed": true
+        },
+        {
+          "id": 119, "timestamp": 1700001080000, "authorId": 2, "outgoing": false
         }
       ]
     },
@@ -177,7 +184,8 @@
           "text": "ok",
           "replyTo": {"text": "Me too!", "messageId": 203}
         }
-      ]
+      ],
+      "reactionEvents": []
     },
     {
       "id": 30,
@@ -196,7 +204,8 @@
           "kind": "text",
           "text": "cross-chat quote"
         }
-      ]
+      ],
+      "reactionEvents": []
     }
   ]
 }

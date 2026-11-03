@@ -210,3 +210,13 @@ def test_edit_history_token_needs_the_flag_and_a_token():
 def test_voice_note_that_was_never_downloaded_is_still_voice():
     d = enrich.describe(_row(Type=11, PayloadPath="", Info='{"audio_ptt":{"duration":9000}}'))
     assert d["kind"] == "voice" and d["text"] == "[Voice message] (missing on disk)"
+
+
+def test_reaction_record_details():
+    both = '{"1on1reactions":{"reaction":2,"reaction_v1":2}}'
+    assert enrich.reaction_record(_row(Type=0, Info=both)) == {"reaction": "2"}
+    legacy_only = '{"1on1reactions":{"reaction":0,"reaction_v1":6}}'
+    assert enrich.reaction_record(_row(Type=0, Info=legacy_only)) == {"reaction": "6"}
+    taken_back = '{"1on1reactions":{"reaction":0,"reaction_v1":0}}'
+    assert enrich.reaction_record(_row(Type=0, Info=taken_back)) == {"removed": True}
+    assert enrich.reaction_record(_row(Type=0, Body="6253455409851423095")) == {}

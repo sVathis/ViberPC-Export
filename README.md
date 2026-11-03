@@ -133,7 +133,7 @@ is what the tests compare against.
       "authorId": 2,                           // Events.ContactID (not on calls)
       "outgoing": false,                       // (not on calls)
       "peerId": 2,                             // calls only: the other party
-      "kind": "text|image|video|voice|file|sticker|link|reaction|post|system|call|location|contact",
+      "kind": "text|image|video|voice|file|sticker|link|post|system|call|location|contact",
       "text": "…", "caption": "…",             // text keeps its newlines
       "link":   { "url": "…", "title": "…" },
       "media":  { "path": "media/…", "status": "original|thumbnail|missing", "name": "…", "durationMs": 0 },
@@ -143,7 +143,12 @@ is what the tests compare against.
       "reactions": { "others": { "<reactionId>": 2 }, "self": "…" },
       "call":     { "durationMs": 0, "video": false, "missed": false },
       "location": { "lat": 40.7128, "lon": -74.006 },
-      "contact":  { "name": "…", "number": "…" } }] }] }
+      "contact":  { "name": "…", "number": "…" } }],
+    "reactionEvents": [{                       // chronological; Viber's reaction records, not chat messages
+      "id": 114, "timestamp": 1700000780000, "authorId": 2, "outgoing": false,
+      "targetId": 104,                         // the message reacted to (same chat), when exported
+      "reaction": "2"                          // Viber reaction id; or "removed": true when taken back
+    }] }] }
 ```
 
 Rules a reader can rely on:
@@ -180,9 +185,13 @@ Rules a reader can rely on:
   (`Messages.ClientFlag` bit 256, carrying `Info.edit.token`) whose edited message is in the
   export are dropped and that message gets `"edited": true`; a record that is the only row
   for its message is kept.
-- `kind: "reaction"` rows are Viber's technical records of someone reacting, not chat
-  bubbles: `replyTo.messageId` is the message that was reacted to, so a viewer should fold
-  them into that message instead of showing them.
+- Reaction records (Viber's 1:1 "someone reacted" rows) are not chat messages, so they are
+  **not** in `messages`: each chat has a separate `reactionEvents` list (always present,
+  possibly empty). `targetId` is the message reacted to (same chat, omitted when it is not
+  exported); `reaction` is Viber's reaction id (see `reactions.others` for the ids) and
+  `removed: true` marks a reaction that was taken back; an old-style record that names
+  neither has just the id, time and author. Message counts, search and the chat view can
+  ignore this list; a viewer that wants to show reactions can attach them via `targetId`.
 - Media: `media_index.csv` is linked only for the default `--db` (override with
   `--media-index FILE`). An entry is used only if its event is in that database, its
   recorded direction, kind and time agree with the event (event ids repeat between

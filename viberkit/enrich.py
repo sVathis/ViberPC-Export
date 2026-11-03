@@ -224,6 +224,20 @@ def file_name(row):
     return payload.replace("\\", "/").rsplit("/", 1)[-1] if payload else ""
 
 
+def reaction_record(row):
+    """Details of a reaction record (a row describe() classes as kind "reaction").
+
+    Returns {"reaction": "<id>"} for a reaction, {"removed": True} when the
+    reaction was taken back, and {} when the row does not say (an old-style
+    record that is only a message token).
+    """
+    one_on_one = parse_info(row.get("Info")).get("1on1reactions")
+    if not isinstance(one_on_one, dict):
+        return {}
+    rid = one_on_one.get("reaction") or one_on_one.get("reaction_v1")
+    return {"reaction": str(rid)} if rid else {"removed": True}
+
+
 def edit_history_token(row):
     """Token of the edited message when this row is a technical edit-history
     record, else None.

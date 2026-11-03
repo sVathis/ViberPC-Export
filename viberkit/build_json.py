@@ -80,9 +80,30 @@ def _raw(row, stripped):
     return stripped
 
 
+def _describe(row):
+    return enrich.describe(row) if row["Type"] is not None else enrich.describe_event(row)
+
+
+def _reference(row, refs):
+    """EventID of the exported message of the same chat that a token in `row` names, or None."""
+    target_id, target_chat = refs.get(enrich.context(row)["reply_token"], (None, None))
+    return target_id if target_id is not None and target_chat == row["chat"] else None
+
+
+def _reaction_event(row, refs, selfids):
+    """A reaction record as its own small event: who reacted to which message."""
+    event = {"id": row["EventID"], "timestamp": row["ts"], "authorId": row["cid"],
+             "outgoing": row["dir"] == 1 or row["cid"] in selfids}
+    target = _reference(row, refs)
+    if target is not None:
+        event["targetId"] = target
+    event.update(enrich.reaction_record(row))
+    return event
+
+
 def _message(row, refs, selfids, media, edited_ids):
     """One message dict from a joined Events(+Messages) row."""
-    desc = enrich.describe(row) if row["Type"] is not None else enrich.describe_event(row)
+    desc = _describe(row)
     kind = desc["kind"]
     event_id = str(row["EventID"])
     entry = media.get(event_id)
@@ -155,8 +176,8 @@ def _message(row, refs, selfids, media, edited_ids):
     reply = {}
     if ctx["reply_to"]:
         reply["text"] = ctx["reply_to"]
-    target_id, target_chat = refs.get(ctx["reply_token"], (None, None))
-    if target_id is not None and target_chat == row["chat"]:    # an exported message of the same chat
+    target_id = _reference(row, refs)
+    if target_id is not None:
         reply["messageId"] = target_id
     if reply:
         msg["replyTo"] = reply
@@ -256,12 +277,19 @@ def build(model, media=None, exported_at=None):
         kind = _chat_type(model.chattype.get(chat), others)
         used.update(others)
         used.update(r["cid"] for r in chat_rows if r["cid"])
+        messages, reaction_events = [], []
+        for r in chat_rows:
+            if _describe(r)["kind"] == "reaction":
+                reaction_events.append(_reaction_event(r, refs, selfids))
+            else:
+                messages.append(_message(r, refs, selfids, media, edited_ids))
         chats.append({
             "id": chat,
             "title": _chat_title(model, chat, kind, others),
             "type": kind,
             "memberIds": others,
-            "messages": [_message(r, refs, selfids, media, edited_ids) for r in chat_rows],
+            "messages": messages,
+            "reactionEvents": reaction_events,
         })
 
     self_info = {"contactIds": sorted(selfids)}
