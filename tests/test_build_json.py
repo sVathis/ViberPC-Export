@@ -9,6 +9,8 @@ import json
 import os
 import sqlite3
 
+import pytest
+
 from viberkit import build_json, config
 from viberkit.build_log import media_entries
 from viberkit.model import Model
@@ -24,11 +26,20 @@ CREATE TABLE ChatInfo (ChatID INTEGER, Name TEXT, PGType INTEGER);
 CREATE TABLE ChatRelation (ChatID INTEGER, ContactID INTEGER);
 CREATE TABLE Events (EventID INTEGER, TimeStamp INTEGER, Direction INTEGER, Type INTEGER,
                      ContactLongitude INTEGER, ContactLatitude INTEGER,
-                     ChatID INTEGER, ContactID INTEGER, Token INTEGER);
+                     ChatID INTEGER, ContactID INTEGER, Token INTEGER, SortOrder INTEGER);
 CREATE TABLE Messages (EventID INTEGER, Type INTEGER, Subject TEXT, Body TEXT,
                        PayloadPath TEXT, ThumbnailPath TEXT, StickerID NUM, Duration NUM,
                        Info TEXT, PGIsLiked INTEGER, PGLikeCount INTEGER, SelfReaction TEXT,
-                       MembersReactions TEXT, AdminsReactions TEXT);
+                       MembersReactions TEXT, AdminsReactions TEXT, ClientFlag INTEGER);
+"""
+
+# An older database: no PGType, SortOrder, Token, lat/lon, ClientFlag, ... columns at all.
+LEGACY_SCHEMA = """
+CREATE TABLE Contact (ContactID INTEGER, Name TEXT, Number TEXT, ClientName TEXT);
+CREATE TABLE ChatInfo (ChatID INTEGER, Name TEXT);
+CREATE TABLE ChatRelation (ChatID INTEGER, ContactID INTEGER);
+CREATE TABLE Events (EventID INTEGER, TimeStamp INTEGER, Direction INTEGER, ChatID INTEGER, ContactID INTEGER);
+CREATE TABLE Messages (EventID INTEGER, Type INTEGER, Body TEXT);
 """
 
 # EventID -> {"saved_path", "status"}, as build_log.media_entries() returns it.
@@ -47,10 +58,11 @@ def _info(**kw):
 
 
 def _add(  # pylint: disable=too-many-arguments
-        con, eid, offset_ms, chat, cid, direction, mtype, *, etype=0, lat=0, lon=0, **cols):
+        con, eid, offset_ms, chat, cid, direction, mtype, *, etype=0, lat=0, lon=0, so=0, **cols):
     """Insert an Events row (its Token is 8900 + eid) and, unless mtype is None, its Messages row."""
-    con.execute("INSERT INTO Events VALUES (?,?,?,?,?,?,?,?,?)",
-                (eid, T0 + offset_ms, direction, etype, lon, lat, chat, cid, 8900 + eid))
+    con.execute("INSERT INTO Events (EventID, TimeStamp, Direction, Type, ContactLongitude, ContactLatitude,"
+                " ChatID, ContactID, Token, SortOrder) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (eid, T0 + offset_ms, direction, etype, lon, lat, chat, cid, 8900 + eid, so))
     if mtype is not None:
         cols["EventID"], cols["Type"] = eid, mtype
         con.execute(f"INSERT INTO Messages ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
@@ -95,9 +107,10 @@ def _synthetic_db():
     _add(con, 112, 660000, 10, 2, 0, 1, Body="Forwarded text",
          Info=_info(generalFwdInfo={"num_forwards": 1}))
     _add(con, 113, 720000, 10, 2, 0, None, etype=1)                   # a call: no Messages row
-    _add(con, 114, 780000, 10, 2, 0, 0, etype=3, Body="6253459179658317583",
-         Info=_info(**{"1on1reactions": {"reaction": 2, "reaction_v1": 2}}))
+    _add(con, 114, 780000, 10, 2, 0, 0, etype=3, Body="6253459179658317583",   # reacts to message 104
+         Info=_info(**{"1on1reactions": {"reaction": 2, "reaction_v1": 2}, "quote": {"token": 9004}}))
     _add(con, 115, 840000, 10, 2, 0, 72)
+    _add(con, 116, 900000, 10, 2, 0, None, etype=2)                   # an unmatched event that is no call
 
     # chat 20: a group (self is also listed as a member); one reply to a token that is not in the export
     _add(con, 201, 1000000, 20, 3, 0, 1, Body="Who is in?")
@@ -105,6 +118,16 @@ def _synthetic_db():
          Info=_info(quote={"text": "Who is in?", "token": 9101}))
     _add(con, 203, 1120000, 20, 2, 0, 1, Body="Me too",
          Info=_info(quote={"text": "Earlier message not exported", "token": 424242}))
+    # an outgoing call whose ContactID is a peer (Bob): must not make Bob "self"
+    _add(con, 204, 1125000, 20, 3, 1, None, etype=1)
+    # edit-history record (ClientFlag bit 256) of message 203: dropped, 203 is flagged edited
+    _add(con, 205, 1130000, 20, 2, 0, 1, Body="Me too!", ClientFlag=256, Info=_info(edit={"token": 9103}))
+    _add(con, 206, 1140000, 20, 3, 0, 1, Body="  padded text  \nline two\n")   # whitespace is kept
+    # edit-history record that is the only row for its message: kept
+    _add(con, 207, 1150000, 20, 3, 0, 1, Body="Only copy", ClientFlag=257, Info=_info(edit={"token": 9107}))
+    # same timestamp: Viber's SortOrder decides, not the EventID
+    _add(con, 208, 1160000, 20, 3, 0, 1, Body="second", so=2)
+    _add(con, 209, 1160000, 20, 3, 0, 1, Body="first", so=1)
 
     # chat 30: a community post with a like count and our own like
     _add(con, 301, 2000000, 30, 2, 0, 15, Subject="Promo text", PGLikeCount=12, PGIsLiked=1)
@@ -231,3 +254,125 @@ def test_run_writes_the_json_file(monkeypatch, tmp_path):
     doc = json.loads(out.read_text(encoding="utf-8"))
     assert doc["format"] == "viberpc-export" and doc["version"] == 1
     assert _messages(doc)[104]["media"] == {"status": "missing", "name": "photo1.jpg"}
+
+
+def test_outgoing_call_does_not_make_a_peer_self(monkeypatch):
+    doc = _build(monkeypatch, self_number="")          # self has to be inferred from messages
+    msgs = _messages(doc)
+    assert doc["self"]["contactIds"] == [1]
+    assert {c["id"]: c["memberIds"] for c in doc["chats"]}[20] == [2, 3]
+    assert msgs[204]["outgoing"] is True               # by its Direction ...
+    assert msgs[201]["outgoing"] is False              # ... while Bob's messages stay incoming
+
+
+def test_edit_history_record_is_dropped_and_its_message_flagged(monkeypatch):
+    msgs = _messages(_build(monkeypatch))
+    assert 205 not in msgs
+    assert msgs[203]["text"] == "Me too" and msgs[203]["edited"] is True
+
+
+def test_lone_edit_history_record_is_kept(monkeypatch):
+    assert _messages(_build(monkeypatch))[207]["text"] == "Only copy"
+
+
+def test_unmatched_event_that_is_not_a_call_is_left_out(monkeypatch):
+    assert 116 not in _messages(_build(monkeypatch))
+
+
+def test_reaction_record_points_at_its_target(monkeypatch):
+    msg = _messages(_build(monkeypatch))[114]
+    assert msg["kind"] == "reaction" and msg["replyTo"] == {"messageId": 104}
+
+
+def test_same_timestamp_follows_sort_order(monkeypatch):
+    ids = [m["id"] for m in _build(monkeypatch)["chats"][1]["messages"]]
+    assert ids.index(209) < ids.index(208)             # EventID says 208 first, SortOrder says 209
+
+
+def test_text_whitespace_is_preserved(monkeypatch):
+    assert _messages(_build(monkeypatch))[206]["text"] == "  padded text  \nline two\n"
+
+
+def test_older_schema_without_optional_columns_still_works(monkeypatch):
+    monkeypatch.setattr(config, "self_number", lambda: "")
+    con = sqlite3.connect(":memory:")
+    con.executescript(LEGACY_SCHEMA)
+    con.execute("INSERT INTO Contact VALUES (2, 'Alice Example', '+10000000002', NULL)")
+    con.execute("INSERT INTO ChatInfo VALUES (10, NULL)")
+    con.execute("INSERT INTO ChatRelation VALUES (10, 2)")
+    con.execute("INSERT INTO Events VALUES (1, 1700000000000, 0, 10, 2)")
+    con.execute("INSERT INTO Messages VALUES (1, 1, 'hi')")
+    model = Model(con)
+    assert [r["EventID"] for r in model.events()] == [1]          # what log / media / html use
+    chat = build_json.build(model, exported_at=EXPORTED_AT)["chats"][0]
+    assert chat["type"] == "direct" and chat["messages"][0]["text"] == "hi"
+
+
+def _write_index(tmp_path):
+    (tmp_path / "media").mkdir()
+    (tmp_path / "media" / "photo.jpg").write_bytes(b"x")
+    (tmp_path / "media_index.csv").write_text(
+        "EventID,time,direction,peer,kind,status,orig_path,saved_path\n"
+        "104,t,IN,p,image,original,C:\\x\\a.jpg,media/photo.jpg\n"
+        "105,t,OUT,p,video,original,C:\\x\\b.mp4,media/gone.mp4\n"          # file no longer there
+        "99999,t,IN,p,image,original,C:\\x\\c.jpg,media/photo.jpg\n",       # event not in this database
+        encoding="utf-8")
+
+
+def _file_db(tmp_path, name):
+    db = tmp_path / name
+    with sqlite3.connect(db) as dest:
+        _synthetic_db().backup(dest)
+    dest.close()
+    return db
+
+
+def _run(tmp_path, db, **kw):
+    out = tmp_path / "out.json"
+    build_json.run(db=str(db), out=str(out), **kw)
+    return _messages(json.loads(out.read_text(encoding="utf-8")))
+
+
+def test_run_links_only_media_that_belongs_here_and_exists(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(config, "self_number", lambda: SELF_NUMBER)
+    monkeypatch.setattr(config, "EXPORT_DIR", str(tmp_path))
+    _write_index(tmp_path)
+    msgs = _run(tmp_path, _file_db(tmp_path, "viber_export.db"))
+    assert msgs[104]["media"]["path"] == "media/photo.jpg"
+    assert msgs[105]["media"]["status"] == "missing"
+    assert "ignored 1 entries" in capsys.readouterr().out
+
+
+def test_run_does_not_use_the_default_index_for_another_database(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(config, "self_number", lambda: SELF_NUMBER)
+    monkeypatch.setattr(config, "EXPORT_DIR", str(tmp_path))
+    _write_index(tmp_path)
+    msgs = _run(tmp_path, _file_db(tmp_path, "old_archive.db"))
+    assert msgs[104]["media"] == {"status": "missing", "name": "photo1.jpg"}
+    assert "media_index.csv is not used" in capsys.readouterr().out
+
+
+def test_run_accepts_an_explicit_media_index(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "self_number", lambda: SELF_NUMBER)
+    monkeypatch.setattr(config, "EXPORT_DIR", str(tmp_path))
+    _write_index(tmp_path)
+    msgs = _run(tmp_path, _file_db(tmp_path, "old_archive.db"),
+                media_index=str(tmp_path / "media_index.csv"))
+    assert msgs[104]["media"]["path"] == "media/photo.jpg"
+
+
+def test_run_keeps_the_previous_file_when_writing_fails(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "self_number", lambda: SELF_NUMBER)
+    monkeypatch.setattr(config, "EXPORT_DIR", str(tmp_path))
+    db = _file_db(tmp_path, "viber_export.db")
+    out = tmp_path / "out.json"
+    out.write_text("previous export", encoding="utf-8")
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(build_json.json, "dump", boom)
+    with pytest.raises(RuntimeError):
+        build_json.run(db=str(db), out=str(out))
+    assert out.read_text(encoding="utf-8") == "previous export"
+    assert not (tmp_path / "out.json.tmp").exists()

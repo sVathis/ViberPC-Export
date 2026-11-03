@@ -37,6 +37,9 @@ TEXT_TYPES = {0, 1}
 # Events.ContactLatitude/Longitude are degrees * 1e7 (integers).
 LOCATION_SCALE = 1e7
 
+# Messages.ClientFlag bit marking a technical edit-history record.
+EDIT_HISTORY_FLAG = 256
+
 # Extensions Viber uses for playable audio (voice notes are .m4a).
 AUDIO_EXT = {".m4a", ".mp3", ".aac", ".ogg", ".opus", ".wav", ".amr"}
 
@@ -217,6 +220,26 @@ def file_name(row):
         return str(file_info["FileName"]).strip()
     payload = (row.get("PayloadPath") or "").strip()
     return payload.replace("\\", "/").rsplit("/", 1)[-1] if payload else ""
+
+
+def edit_history_token(row):
+    """Token of the edited message when this row is a technical edit-history
+    record, else None.
+
+    Such records have Messages.ClientFlag bit 256 set and carry Info.edit.token
+    (visible edited messages carry Info.edit.editedWithToken instead). The token
+    is the Events.Token of the message that was edited - the record itself when
+    that message has no row of its own.
+    """
+    try:
+        flag = int(row.get("ClientFlag") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not flag & EDIT_HISTORY_FLAG:
+        return None
+    edit = parse_info(row.get("Info")).get("edit")
+    token = edit.get("token") if isinstance(edit, dict) else None
+    return token if isinstance(token, int) and not isinstance(token, bool) and token > 0 else None
 
 
 def forwarded(row):

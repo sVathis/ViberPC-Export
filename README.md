@@ -162,8 +162,26 @@ Rules a reader can rely on:
   the export has no call duration, direction or video flag, so `call` is not written yet.
 - `location.lat` / `lon` are degrees (Viber stores them ×1e7); the address, when known,
   is in `text`. They are omitted when Viber stored no coordinates.
-- `self.contactIds` lists every contact id that is you (the configured account, plus the
-  author of any outgoing message); use it, not `outgoing`, to tell your own contact entry.
+- `self.contactIds` lists every contact id that is you: the configured account, plus the
+  author of any outgoing **message** (calls are not used for this, so a peer you called is
+  never mistaken for yourself). `outgoing` follows Viber's `Direction` (or an author in `self`).
+- `text` and `caption` are kept exactly as stored, including leading/trailing whitespace
+  and newlines.
+- Order within a chat is `TimeStamp`, then Viber's `SortOrder`, then `EventID`.
+- Only conversation items are written: calls (events without a message row) are kept, any
+  other event without a message row is left out. Technical **edit-history records**
+  (`Messages.ClientFlag` bit 256, carrying `Info.edit.token`) whose edited message is in the
+  export are dropped and that message gets `"edited": true`; a record that is the only row
+  for its message is kept.
+- `kind: "reaction"` rows are Viber's technical records of someone reacting, not chat
+  bubbles: `replyTo.messageId` is the message that was reacted to, so a viewer should fold
+  them into that message instead of showing them.
+- Media: `media_index.csv` is linked only for the default `--db` (override with
+  `--media-index FILE`), and only entries whose event is in that database and whose copied
+  file still exists; the rest read as `"status": "missing"`. The file is written atomically
+  (an interrupted run never replaces a good export).
+- Older databases that lack optional columns (`PGType`, `SortOrder`, `Token`,
+  `ClientFlag`, …) still export: the missing values just read as absent.
 
 ## 🧰 All methods
 

@@ -195,3 +195,13 @@ def test_context_reply_token():
 def test_reactions_self_like_from_pg_is_liked():
     _, detail = enrich.reactions(_row(PGIsLiked=1, PGLikeCount=2))
     assert detail["self_like"] == "\U0001F44D" and detail["self"] == "" and detail["like_count"] == 2
+
+
+def test_edit_history_token_needs_the_flag_and_a_token():
+    info = '{"edit":{"token":9103}}'
+    assert enrich.edit_history_token(_row(ClientFlag=256, Info=info)) == 9103
+    assert enrich.edit_history_token(_row(ClientFlag=1048961, Info=info)) == 9103   # bit 256 among others
+    assert enrich.edit_history_token(_row(ClientFlag=0, Info=info)) is None
+    assert enrich.edit_history_token(_row(ClientFlag=256, Info='{"edit":{"editedWithToken":5}}')) is None
+    assert enrich.edit_history_token(_row(ClientFlag=256, Info="{}")) is None
+    assert enrich.edit_history_token(_row(Info=info)) is None                       # no ClientFlag column

@@ -27,7 +27,7 @@ def clean(s):
 MESSAGE_COLS = (
     "EventID", "Type", "Subject", "Body", "PayloadPath", "ThumbnailPath",
     "StickerID", "Duration", "Info", "PGIsLiked", "PGLikeCount",
-    "SelfReaction", "MembersReactions", "AdminsReactions",
+    "SelfReaction", "MembersReactions", "AdminsReactions", "ClientFlag",
 )
 
 
@@ -43,7 +43,8 @@ class Model:
         self.chattype = {}
         for r in cur.execute("SELECT ContactID,Name,Number,ClientName FROM Contact"):
             self.contacts[r["ContactID"]] = (r["Name"], r["Number"], r["ClientName"])
-        for r in cur.execute("SELECT ChatID,Name,PGType FROM ChatInfo"):
+        pgtype = "PGType" if "PGType" in self.columns("ChatInfo") else "NULL"
+        for r in cur.execute(f"SELECT ChatID,Name,{pgtype} AS PGType FROM ChatInfo"):
             self.chatinfo[r["ChatID"]] = r["Name"]
             self.chattype[r["ChatID"]] = r["PGType"]
         for r in cur.execute("SELECT ChatID,ContactID FROM ChatRelation"):
@@ -92,19 +93,33 @@ class Model:
         return False, (peer or chatname or f"ChatID={chat}")
 
     def events(self, include_empty=False):
-        """Yield joined Events + Messages rows in chronological order.
+        """Yield joined Events + Messages rows in display order.
 
+        Order is TimeStamp, SortOrder (Viber's own tie-break), EventID.
         With include_empty=True, Events that have no Messages row (calls, ...)
-        are kept too (their message columns are NULL).
+        are kept too (their message columns are NULL). Columns missing from an
+        older schema read as NULL; only the key columns are required.
         """
-        cols = ",".join(f"m.{c} {c}" for c in MESSAGE_COLS if c != "EventID")
+        ev, msg = self.columns("Events"), self.columns("Messages")
+
+        def pick(alias, have, name, out):
+            return f"{alias}.{name} {out}" if name in have else f"NULL {out}"
+
+        cols = ",".join(pick("m", msg, c, c) for c in MESSAGE_COLS if c != "EventID")
+        extra = ",".join((pick("e", ev, "Type", "etype"), pick("e", ev, "Token", "token"),
+                          pick("e", ev, "ContactLatitude", "lat"),
+                          pick("e", ev, "ContactLongitude", "lon")))
+        order = "e.TimeStamp, e.SortOrder, e.EventID" if "SortOrder" in ev else "e.TimeStamp, e.EventID"
         join = "LEFT JOIN" if include_empty else "JOIN"
         q = (f"SELECT e.TimeStamp ts, e.Direction dir, e.ChatID chat, "
-             f"e.ContactID cid, e.EventID EventID, e.Type etype, e.Token token, "
-             f"e.ContactLatitude lat, e.ContactLongitude lon, {cols} "
+             f"e.ContactID cid, e.EventID EventID, {extra}, {cols} "
              f"FROM Events e {join} Messages m ON m.EventID=e.EventID "
-             "ORDER BY e.TimeStamp, e.EventID")
+             f"ORDER BY {order}")
         return self.con.execute(q)
+
+    def columns(self, table):
+        """Column names of a table (empty set if it does not exist)."""
+        return {r[1] for r in self.con.execute(f"PRAGMA table_info({table})")}
 
     def close(self):
         self.con.close()

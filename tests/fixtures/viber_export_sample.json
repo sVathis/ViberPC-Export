@@ -107,7 +107,8 @@
         {
           "id": 114, "timestamp": 1700000780000, "authorId": 2, "outgoing": false,
           "kind": "reaction",
-          "text": "[reacted ❤️]"
+          "text": "[reacted ❤️]",
+          "replyTo": {"messageId": 104}
         },
         {
           "id": 115, "timestamp": 1700000840000, "authorId": 2, "outgoing": false,
@@ -137,7 +138,33 @@
           "id": 203, "timestamp": 1700001120000, "authorId": 2, "outgoing": false,
           "kind": "text",
           "text": "Me too",
-          "replyTo": {"text": "Earlier message not exported"}
+          "replyTo": {"text": "Earlier message not exported"},
+          "edited": true
+        },
+        {
+          "id": 204, "timestamp": 1700001125000, "authorId": 3, "outgoing": true,
+          "kind": "call"
+        },
+        {
+          "id": 206, "timestamp": 1700001140000, "authorId": 3, "outgoing": false,
+          "kind": "text",
+          "text": "  padded text  \nline two\n"
+        },
+        {
+          "id": 207, "timestamp": 1700001150000, "authorId": 3, "outgoing": false,
+          "kind": "text",
+          "text": "Only copy",
+          "edited": true
+        },
+        {
+          "id": 209, "timestamp": 1700001160000, "authorId": 3, "outgoing": false,
+          "kind": "text",
+          "text": "first"
+        },
+        {
+          "id": 208, "timestamp": 1700001160000, "authorId": 3, "outgoing": false,
+          "kind": "text",
+          "text": "second"
         }
       ]
     },

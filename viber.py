@@ -41,7 +41,7 @@ def cmd_media(a):
 
 def cmd_json(a):
     from viberkit import build_json
-    build_json.run(db=a.db, out=a.out)
+    build_json.run(db=a.db, out=a.out, media_index=a.media_index)
 
 
 def cmd_log(a):
@@ -123,6 +123,9 @@ def main():
     s = sub.add_parser("json", help="build export/viber_export.json (structured, for a viewer)")
     s.add_argument("--db", default=None, help="path to a clean .db (default export/viber_export.db)")
     s.add_argument("--out", default=None, help="output file (default export/viber_export.json)")
+    s.add_argument("--media-index", default=None,
+                   help="media_index.csv to link media from (default: export/media_index.csv, "
+                        "used only with the default --db)")
     s.set_defaults(func=cmd_json)
 
     s = sub.add_parser("log", help="build the log from the export")
