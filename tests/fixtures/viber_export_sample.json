@@ -1,0 +1,211 @@
+{
+  "format": "viberpc-export",
+  "version": 1,
+  "exportedAt": "2025-01-01T00:00:00Z",
+  "self": {
+    "contactIds": [1],
+    "name": "Me Synthetic",
+    "number": "+10000000001"
+  },
+  "contacts": {
+    "1": {"name": "Me Synthetic", "number": "+10000000001"},
+    "2": {"name": "Alice Example", "number": "+10000000002"},
+    "3": {"name": "Bob Example", "number": "+10000000003"}
+  },
+  "chats": [
+    {
+      "id": 10,
+      "title": "Alice Example (+10000000002)",
+      "type": "direct",
+      "memberIds": [2],
+      "messages": [
+        {
+          "id": 101, "timestamp": 1700000000000, "authorId": 2, "outgoing": false,
+          "kind": "text",
+          "text": "Hello there\nsecond line"
+        },
+        {
+          "id": 102, "timestamp": 1700000060000, "authorId": 1, "outgoing": true,
+          "kind": "text",
+          "text": "Hi Alice!",
+          "replyTo": {"text": "Hello there", "messageId": 101},
+          "reactions": {"others": {"1": 1}}
+        },
+        {
+          "id": 103, "timestamp": 1700000120000, "authorId": 2, "outgoing": false,
+          "kind": "text",
+          "text": "Meet at 5pm?",
+          "edited": true,
+          "reactions": {"self": "😂"}
+        },
+        {
+          "id": 104, "timestamp": 1700000180000, "authorId": 2, "outgoing": false,
+          "kind": "image",
+          "caption": "Look at this",
+          "media": {
+            "path": "media/Alice Example/2023-11-14_104_photo1.jpg",
+            "status": "original",
+            "name": "photo1.jpg"
+          }
+        },
+        {
+          "id": 105, "timestamp": 1700000240000, "authorId": 1, "outgoing": true,
+          "kind": "video",
+          "media": {
+            "path": "media/Alice Example/thumb_2023-11-14_105_clip.jpg",
+            "status": "thumbnail",
+            "name": "clip.mp4",
+            "durationMs": 22431
+          }
+        },
+        {
+          "id": 106, "timestamp": 1700000300000, "authorId": 2, "outgoing": false,
+          "kind": "voice",
+          "media": {
+            "path": "media/Alice Example/2023-11-14_106_voice_Alice Example.m4a",
+            "status": "original",
+            "durationMs": 14000
+          }
+        },
+        {
+          "id": 107, "timestamp": 1700000360000, "authorId": 2, "outgoing": false,
+          "kind": "file",
+          "media": {"status": "missing", "name": "Quarterly report.pdf"}
+        },
+        {
+          "id": 108, "timestamp": 1700000420000, "authorId": 1, "outgoing": true,
+          "kind": "sticker",
+          "sticker": {"id": 40103, "path": "media/stickers/00040103.png"}
+        },
+        {
+          "id": 109, "timestamp": 1700000480000, "authorId": 2, "outgoing": false,
+          "kind": "link",
+          "text": "https://example.com/a",
+          "link": {"url": "https://example.com/a", "title": "Example Domain"}
+        },
+        {
+          "id": 110, "timestamp": 1700000540000, "authorId": 2, "outgoing": false,
+          "kind": "location",
+          "text": "1 Example Street",
+          "location": {"lat": 40.7128, "lon": -74.006}
+        },
+        {
+          "id": 111, "timestamp": 1700000600000, "authorId": 1, "outgoing": true,
+          "kind": "contact",
+          "contact": {"name": "Dan Example", "number": "+10000000005"}
+        },
+        {
+          "id": 112, "timestamp": 1700000660000, "authorId": 2, "outgoing": false,
+          "kind": "text",
+          "text": "Forwarded text",
+          "forwarded": true
+        },
+        {
+          "id": 113, "timestamp": 1700000720000, "peerId": 2,
+          "kind": "call"
+        },
+        {
+          "id": 115, "timestamp": 1700000840000, "authorId": 2, "outgoing": false,
+          "kind": "system",
+          "text": "[system message]"
+        },
+        {
+          "id": 117, "timestamp": 1700000960000, "authorId": 2, "outgoing": false,
+          "kind": "voice",
+          "media": {"status": "missing", "durationMs": 9000}
+        }
+      ],
+      "reactionEvents": [
+        {
+          "id": 114, "timestamp": 1700000780000, "authorId": 2, "outgoing": false,
+          "targetId": 104, "reaction": "2"
+        },
+        {
+          "id": 118, "timestamp": 1700001020000, "authorId": 1, "outgoing": true,
+          "targetId": 101, "removed": true
+        },
+        {
+          "id": 119, "timestamp": 1700001080000, "authorId": 2, "outgoing": false
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "title": "Weekend Plans",
+      "type": "group",
+      "memberIds": [2, 3],
+      "messages": [
+        {
+          "id": 201, "timestamp": 1700001000000, "authorId": 3, "outgoing": false,
+          "kind": "text",
+          "text": "Who is in?"
+        },
+        {
+          "id": 202, "timestamp": 1700001060000, "authorId": 1, "outgoing": true,
+          "kind": "text",
+          "text": "I am",
+          "replyTo": {"text": "Who is in?", "messageId": 201}
+        },
+        {
+          "id": 203, "timestamp": 1700001120000, "authorId": 2, "outgoing": false,
+          "kind": "text",
+          "text": "Me too",
+          "replyTo": {"text": "Earlier message not exported"},
+          "edited": true
+        },
+        {
+          "id": 204, "timestamp": 1700001125000, "peerId": 3,
+          "kind": "call"
+        },
+        {
+          "id": 206, "timestamp": 1700001140000, "authorId": 3, "outgoing": false,
+          "kind": "text",
+          "text": "  padded text  \nline two\n"
+        },
+        {
+          "id": 207, "timestamp": 1700001150000, "authorId": 3, "outgoing": false,
+          "kind": "text",
+          "text": "Only copy",
+          "edited": true
+        },
+        {
+          "id": 209, "timestamp": 1700001160000, "authorId": 3, "outgoing": false,
+          "kind": "text",
+          "text": "first"
+        },
+        {
+          "id": 208, "timestamp": 1700001160000, "authorId": 3, "outgoing": false,
+          "kind": "text",
+          "text": "second"
+        },
+        {
+          "id": 210, "timestamp": 1700001170000, "authorId": 1, "outgoing": true,
+          "kind": "text",
+          "text": "ok",
+          "replyTo": {"text": "Me too!", "messageId": 203}
+        }
+      ],
+      "reactionEvents": []
+    },
+    {
+      "id": 30,
+      "title": "Synthetic Community",
+      "type": "community",
+      "memberIds": [2],
+      "messages": [
+        {
+          "id": 301, "timestamp": 1700002000000, "authorId": 2, "outgoing": false,
+          "kind": "post",
+          "text": "Promo text",
+          "reactions": {"others": {"1": 12}, "self": "👍"}
+        },
+        {
+          "id": 302, "timestamp": 1700002060000, "authorId": 2, "outgoing": false,
+          "kind": "text",
+          "text": "cross-chat quote"
+        }
+      ],
+      "reactionEvents": []
+    }
+  ]
+}

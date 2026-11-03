@@ -10,7 +10,11 @@ Message Type codes (established from real data):
   11          file                  -> PayloadPath
               voice note (PTT)      -> PayloadPath under a \\PTT\\ folder (.m4a)
   4           sticker               -> StickerID
+  5           location              -> Info.locationInfo.address + Events lat/lon
+  10          contact card          -> Info.Name / PhoneNumber / ViberNumber
   other       system / rich / bot   -> Body when present, else a type tag
+An Events row with no Messages row at all is a call (Events.Type 1); see
+describe_event().
 """
 import json
 import os
@@ -29,6 +33,12 @@ REACTION_EMOJI = {
 
 MEDIA_KIND = {2: "image", 3: "video", 11: "file"}
 TEXT_TYPES = {0, 1}
+
+# Events.ContactLatitude/Longitude are degrees * 1e7 (integers).
+LOCATION_SCALE = 1e7
+
+# Messages.ClientFlag bit marking a technical edit-history record.
+EDIT_HISTORY_FLAG = 256
 
 # Extensions Viber uses for playable audio (voice notes are .m4a).
 AUDIO_EXT = {".m4a", ".mp3", ".aac", ".ogg", ".opus", ".wav", ".amr"}
@@ -70,7 +80,8 @@ def describe(row):
     """Summarize one message row (a plain dict).
 
     Returns a dict:
-      kind       : text | image | video | file | link | sticker | system
+      kind       : text | image | video | voice | file | link | sticker |
+                   reaction | post | system | location | contact
       text       : one-line human summary (already includes filename/caption)
       caption    : optional text that accompanied a media item ('' if none)
       media_path : original on-disk path for media, or ''
@@ -97,9 +108,23 @@ def describe(row):
         return {"kind": "link", "text": summary, "caption": "",
                 "media_path": "", "thumb_path": thumb, "url": url}
 
+    loc = location(row)
+    if loc is not None:
+        text = "[Location]" + (f" {loc['address']}" if loc.get("address") else "")
+        return {"kind": "location", "text": text, "caption": "",
+                "media_path": "", "thumb_path": "", "url": ""}
+
+    card = contact_card(row)
+    if card is not None:
+        who = " ".join(p for p in (card.get("name"), card.get("number")) if p)
+        return {"kind": "contact", "text": f"[Contact card] {who}".rstrip(),
+                "caption": "", "media_path": "", "thumb_path": "", "url": ""}
+
     if payload or mtype in MEDIA_KIND:
         kind = MEDIA_KIND.get(mtype, "file")
-        if kind == "file" and is_voice(payload):
+        # A voice note that was never downloaded has no path to recognise it by,
+        # but still carries Info.audio_ptt.
+        if kind == "file" and (is_voice(payload) or isinstance(info.get("audio_ptt"), dict)):
             kind = "voice"
         dur = _fmt_duration(row.get("Duration"))
         if kind == "voice":
@@ -153,17 +178,152 @@ def describe(row):
             "media_path": "", "thumb_path": "", "url": ""}
 
 
+def describe_event(row):
+    """Summarize an Events row that has no Messages row (message columns NULL).
+
+    Events.Type 1 is a call. The Events table carries no duration, direction
+    or video flag for it, so only the kind is known. Same shape as describe().
+    """
+    if row.get("etype") == 1:
+        return {"kind": "call", "text": "[Call]", "caption": "",
+                "media_path": "", "thumb_path": "", "url": ""}
+    return {"kind": "system", "text": "[system message]", "caption": "",
+            "media_path": "", "thumb_path": "", "url": ""}
+
+
+def media_duration_ms(row):
+    """Duration of a video / voice note in milliseconds, or None.
+
+    Videos use Messages.Duration; voice notes leave it at 0 and keep the
+    length (also ms) in Info.audio_ptt.duration.
+    """
+    try:
+        dur = int(row.get("Duration") or 0)
+    except (TypeError, ValueError):
+        dur = 0
+    if dur <= 0:
+        ptt = parse_info(row.get("Info")).get("audio_ptt")
+        try:
+            dur = int(ptt.get("duration") or 0) if isinstance(ptt, dict) else 0
+        except (TypeError, ValueError):
+            dur = 0
+    return dur if dur > 0 else None
+
+
+def file_name(row):
+    """Original file name of a media/file message ('' when unknown).
+
+    Prefers Info.fileInfo.FileName; falls back to the last segment of the
+    stored path (Viber paths are Windows paths, so split on both separators).
+    """
+    info = parse_info(row.get("Info"))
+    file_info = info.get("fileInfo")
+    if isinstance(file_info, dict) and file_info.get("FileName"):
+        return str(file_info["FileName"]).strip()
+    payload = (row.get("PayloadPath") or "").strip()
+    return payload.replace("\\", "/").rsplit("/", 1)[-1] if payload else ""
+
+
+def reaction_record(row):
+    """Details of a reaction record (a row describe() classes as kind "reaction").
+
+    Returns {"reaction": "<id>"} for a reaction, {"removed": True} when the
+    reaction was taken back, and {} when the row does not say (an old-style
+    record that is only a message token).
+    """
+    one_on_one = parse_info(row.get("Info")).get("1on1reactions")
+    if not isinstance(one_on_one, dict):
+        return {}
+    rid = one_on_one.get("reaction") or one_on_one.get("reaction_v1")
+    return {"reaction": str(rid)} if rid else {"removed": True}
+
+
+def edit_history_token(row):
+    """Token of the edited message when this row is a technical edit-history
+    record, else None.
+
+    Such records have Messages.ClientFlag bit 256 set and carry Info.edit.token
+    (visible edited messages carry Info.edit.editedWithToken instead). The token
+    is the Events.Token of the message that was edited - the record itself when
+    that message has no row of its own.
+    """
+    try:
+        flag = int(row.get("ClientFlag") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not flag & EDIT_HISTORY_FLAG:
+        return None
+    edit = parse_info(row.get("Info")).get("edit")
+    token = edit.get("token") if isinstance(edit, dict) else None
+    return token if isinstance(token, int) and not isinstance(token, bool) and token > 0 else None
+
+
+def forwarded(row):
+    """True when the message was forwarded (Info.generalFwdInfo)."""
+    return isinstance(parse_info(row.get("Info")).get("generalFwdInfo"), dict)
+
+
+def location(row):
+    """Location of a location message, or None for any other message.
+
+    Returns a dict with optional keys lat / lon (degrees) and address. The
+    coordinates live in the Events columns (joined in by Model.events as
+    lat / lon, degrees * 1e7), the address in Info.locationInfo.
+    """
+    loc_info = parse_info(row.get("Info")).get("locationInfo")
+    if row.get("Type") != 5 and not isinstance(loc_info, dict):
+        return None
+    out = {}
+    try:
+        lat = float(row.get("lat")) / LOCATION_SCALE
+        lon = float(row.get("lon")) / LOCATION_SCALE
+    except (TypeError, ValueError):
+        lat = lon = 0.0
+    if (lat or lon) and abs(lat) <= 90 and abs(lon) <= 180:
+        out["lat"], out["lon"] = round(lat, 7), round(lon, 7)
+    address = (loc_info.get("address") or "").strip() if isinstance(loc_info, dict) else ""
+    if address:
+        out["address"] = address
+    return out
+
+
+def contact_card(row):
+    """Shared contact of a contact-card message (Type 10), or None.
+
+    Returns a dict with optional keys name and number (PhoneNumber, else
+    ViberNumber).
+    """
+    if row.get("Type") != 10:
+        return None
+    info = parse_info(row.get("Info"))
+    name = (info.get("Name") or "").strip()
+    number = (info.get("PhoneNumber") or info.get("ViberNumber") or "").strip()
+    out = {}
+    if name:
+        out["name"] = name
+    if number:
+        out["number"] = number
+    return out
+
+
 def context(row):
     """Reply/quote and edit context for a message.
 
-    Returns {"reply_to": <quoted text or ''>, "edited": <bool>}.
+    Returns {"reply_to": <quoted text or ''>, "reply_token": <int or None>,
+    "edited": <bool>}. reply_token is Info.quote.token, which equals the
+    Events.Token of the quoted event (build_json maps it to an EventID).
     """
     info = parse_info(row.get("Info"))
     quote = info.get("quote")
     reply_to = ""
+    reply_token = None
     if isinstance(quote, dict):
         reply_to = (quote.get("text") or "").strip()
-    return {"reply_to": reply_to, "edited": "edit" in info}
+        token = quote.get("token")
+        if isinstance(token, int) and not isinstance(token, bool) and token > 0:
+            reply_token = token
+    return {"reply_to": reply_to, "reply_token": reply_token,
+            "edited": "edit" in info}
 
 
 def reactions(row):
@@ -189,10 +349,12 @@ def reactions(row):
             for rid, cnt in sorted(others.items(), key=lambda kv: -kv[1])))
 
     self_reaction = (row.get("SelfReaction") or "").strip()
+    self_like = ""
     if self_reaction:
         parts.append(f"you:{self_reaction}")
     elif row.get("PGIsLiked"):
-        parts.append(f"you:{REACTION_EMOJI.get(str(row.get('PGIsLiked')), REACTION_EMOJI['1'])}")
+        self_like = REACTION_EMOJI.get(str(row.get("PGIsLiked")), REACTION_EMOJI["1"])
+        parts.append(f"you:{self_like}")
 
     like_count = row.get("PGLikeCount") or 0
     if not others and like_count:
@@ -200,5 +362,5 @@ def reactions(row):
 
     summary = "  ".join(p for p in parts if p)
     detail = {"others": dict(others), "self": self_reaction,
-              "like_count": like_count}
+              "self_like": self_like, "like_count": like_count}
     return summary, detail

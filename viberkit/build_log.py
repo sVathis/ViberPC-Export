@@ -18,17 +18,30 @@ from . import enrich
 from .model import Model, require_db
 
 
-def _media_index():
-    """EventID -> saved relative media path, from export/media_index.csv."""
-    path = os.path.join(config.EXPORT_DIR, "media_index.csv")
+def media_entries(path=None):
+    """EventID (str) -> {"saved_path", "status", "time", "direction", "kind"} for
+    every row of export/media_index.csv that has a copied file (saved_path is
+    relative to export/, forward slashes). status is the CSV status: original |
+    thumbnail | sticker; time / direction / kind are what the index recorded
+    about the event, so a reader can check the entry still fits it."""
+    path = path or os.path.join(config.EXPORT_DIR, "media_index.csv")
     index = {}
     if not os.path.exists(path):
         return index
     with open(path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             if row.get("saved_path"):
-                index[row["EventID"]] = row["saved_path"]
+                index[row["EventID"]] = {"saved_path": row["saved_path"],
+                                         "status": row.get("status") or "",
+                                         "time": row.get("time") or "",
+                                         "direction": row.get("direction") or "",
+                                         "kind": row.get("kind") or ""}
     return index
+
+
+def _media_index():
+    """EventID -> saved relative media path, from export/media_index.csv."""
+    return {eid: e["saved_path"] for eid, e in media_entries().items()}
 
 
 def run(db=None, out=None):
